@@ -1,0 +1,105 @@
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.stream.Collectors;
+
+// Representa uma ordem de compra/venda
+class Order implements Comparable<Order> {
+    String type;  // BUY ou SELL
+    String symbol;  // Ex.: AAPL, TSLA
+    int quantity;  // Quantidade
+    double price;  // Preço unitário
+    Instant timestamp;  // Hora da criação
+
+    public Order(String type, String symbol, int quantity, double price, Instant timestamp) {
+        this.type = type;
+        this.symbol = symbol;
+        this.quantity = quantity;
+        this.price = price;
+        this.timestamp = timestamp;
+    }
+
+    @Override
+    public int compareTo(Order other) {
+        return this.timestamp.compareTo(other.timestamp); // Processar pela ordem de chegada
+    }
+
+    @Override
+    public String toString() {
+        return String.format("[%s] %s %d de %s a $%.2f em %s", 
+                type, quantity, symbol, price, timestamp);
+    }
+}
+
+// Lógica para conexão ao mercado
+class MarketSimulator {
+    private static final Map<String, Double> marketPrices = new ConcurrentHashMap<>();
+
+    // Atualiza preços aleatórios (simulando variação de mercado)
+    static {
+        new ScheduledThreadPoolExecutor(1).scheduleAtFixedRate(() -> {
+            Random rand = new Random();
+            marketPrices.put("AAPL", 150 + rand.nextDouble() * 5);
+            marketPrices.put("TSLA", 700 + rand.nextDouble() * 10);
+            marketPrices.put("GOOGL", 2800 + rand.nextDouble() * 20);
+        }, 0, 1, TimeUnit.SECONDS);
+    }
+
+    // Obtém o preço atual de uma ação
+    public static double getPrice(String symbol) {
+        return marketPrices.getOrDefault(symbol, 0.0);
+    }
+}
+
+// Estratégia de trading
+class TradingStrategy {
+    public static Optional<Order> generateOrder(String symbol) {
+        Random rand = new Random();
+        String type = rand.nextBoolean() ? "BUY" : "SELL";
+        int quantity = rand.nextInt(50) + 1;  // 1 a 50 ações
+        double marketPrice = MarketSimulator.getPrice(symbol);
+        double price = type.equals("BUY") ? marketPrice * 0.99 : marketPrice * 1.01;
+
+        return Optional.of(new Order(type, symbol, quantity, price, Instant.now()));
+    }
+}
+
+// Simulador de HFT
+public class HighFrequencyTradingSystem {
+    public static void main(String[] args) {
+        PriorityBlockingQueue<Order> orderQueue = new PriorityBlockingQueue<>();
+        List<String> symbols = Arrays.asList("AAPL", "TSLA", "GOOGL");
+
+        // Thread para gerar ordens automaticamente
+        ScheduledExecutorService orderGenerator = Executors.newScheduledThreadPool(1);
+        orderGenerator.scheduleAtFixedRate(() -> {
+            symbols.forEach(symbol -> {
+                TradingStrategy.generateOrder(symbol).ifPresent(orderQueue::add);
+            });
+        }, 0, 500, TimeUnit.MILLISECONDS); // Gera ordens a cada 500ms
+
+        // Thread para processar ordens
+        Executors.newSingleThreadExecutor().submit(() -> {
+            while (true) {
+                try {
+                    Order order = orderQueue.take(); // Pega a ordem mais antiga
+                    processOrder(order);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        });
+    }
+
+    // Processa ordens
+    private static void processOrder(Order order) {
+        double marketPrice = MarketSimulator.getPrice(order.symbol);
+        boolean success = 
+            (order.type.equals("BUY") && order.price >= marketPrice) ||
+            (order.type.equals("SELL") && order.price <= marketPrice);
+
+        System.out.printf("Processando: %s | Preço Mercado: $%.2f | Status: %s\n", 
+                order, marketPrice, success ? "EXECUTADA ✅" : "FALHOU ❌");
+    }
+}
